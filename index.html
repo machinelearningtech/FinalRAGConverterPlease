@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinalRAGConverterPlease</title>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+</head>
+<body>
+    <div class="background-animation" id="backgroundAnimation"></div>
+    <div class="container">
+        <h1 id="mainTitle"></h1>
+        <p class="subtitle">Revolutionizing Document Conversion</p>
+        
+        <div class="auth-container" id="authContainer">
+            <div class="auth-form" id="loginForm">
+                <h2>Login</h2>
+                <input type="text" id="loginUsername" placeholder="Username">
+                <input type="password" id="loginPassword" placeholder="Password">
+                <button id="loginBtn" class="glow-button">Login</button>
+                <p class="toggle-form">Don't have an account? <a href="#" id="showRegister">Register for Free</a></p>
+            </div>
+            
+            <div class="auth-form" id="registerForm" style="display: none; transform: rotateY(180deg);">
+                <h2>Register for Free</h2>
+                <input type="text" id="registerUsername" placeholder="Username">
+                <input type="email" id="registerEmail" placeholder="Email">
+                <input type="password" id="registerPassword" placeholder="Password">
+                <input type="password" id="registerConfirmPassword" placeholder="Confirm Password">
+                <button id="registerBtn" class="glow-button">Register</button>
+                <p class="toggle-form">Already have an account? <a href="#" id="showLogin">Login</a></p>
+            </div>
+        </div>
+
+        <div id="errorMessage"></div>
+        <div id="successMessage"></div>
+
+        <div class="converter-box" id="converterBox" style="display: none;">
+            <p class="supported-types">We support these file types:</p>
+            <div class="file-type-selector">
+                <button class="file-type-btn active" data-type="pdf">PDF</button>
+                <button class="file-type-btn" data-type="docx">DOCX</button>
+                <button class="file-type-btn" data-type="pptx">PPTX</button>
+                <button class="file-type-btn" data-type="xlsx">XLSX</button>
+                <button class="file-type-btn" data-type="txt">TXT</button>
+                <button class="file-type-btn" data-type="json">JSON</button>
+                <button class="file-type-btn" data-type="xml">XML</button>
+                <button class="file-type-btn" data-type="csv">CSV</button>
+            </div>
+            <input type="file" id="file-input" class="file-input" multiple>
+            <label for="file-input" class="file-label">Choose Files</label>
+            <div class="drag-drop-area" id="drag-drop-area">
+                <p>Drag and drop files here</p>
+            </div>
+            <div class="progress-container">
+                <div class="converting-text">Converting...</div>
+                <div class="progress-bar">
+                    <div class="progress" id="progress"></div>
+                </div>
+                <div class="progress-text">0%</div>
+            </div>
+            <div class="conversion-stats">
+                <div class="stat">Successful: <span id="successful-conversions">0</span></div>
+                <div class="stat">Failed: <span id="failed-conversions">0</span></div>
+            </div>
+        </div>
+
+        <div class="plan-container">
+            <div class="plan">
+                <h3>Basic Plan</h3>
+                <ul>
+                    <li>3 free downloads</li>
+                    <li>Maximum file size: 5 MB</li>
+                    <li>Standard conversion speed</li>
+                </ul>
+            </div>
+            <div class="plan" id="pro-plan">
+                <h3>Pro Plan</h3>
+                <ul>
+                    <li>Unlimited downloads</li>
+                    <li>Maximum file size: 25 MB</li>
+                    <li>Priority conversion speed</li>
+                    <li>Advanced file type support</li>
+                </ul>
+                <button class="glow-button" id="upgradePro">Upgrade to Pro</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
