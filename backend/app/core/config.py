@@ -1,3 +1,4 @@
+import os
 from pydantic import BaseSettings, AnyHttpUrl
 from typing import List
 import secrets
@@ -14,11 +15,10 @@ class Settings(BaseSettings):
     ]
     PROJECT_NAME: str = "FinalRAGConverterPlease"
 
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    SQLALCHEMY_DATABASE_URI: str = None
+    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "")
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "")
 
     FREE_TIER_LIMIT: int = 5  # Number of free conversions
 

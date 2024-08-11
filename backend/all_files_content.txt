@@ -1,0 +1,446 @@
+==== .dockerignore ====
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+
+
+
+==== app.yaml ====
+name: finalragconverterplease
+region: nyc
+services:
+  - name: web
+    github:
+      repo: machinelearningtech/FinalRAGConverterPlease
+      branch: main
+    dockerfile_path: Dockerfile
+    http_port: 8000
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    envs:
+      - key: POSTGRES_SERVER
+        value: 
+      - key: POSTGRES_USER
+        value: 
+      - key: POSTGRES_PASSWORD
+        value: 
+      - key: POSTGRES_DB
+        value: 
+databases:
+  - engine: PG
+    name: db
+    num_nodes: 1
+    size: db-s-dev-database
+    version: "14"
+
+
+
+
+==== docker-compose.yml ====
+version: '3'
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydatabase
+  db:
+    image: postgres:13
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydatabase
+
+volumes:
+  postgres_data:
+
+
+
+
+==== Dockerfile ====
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim-buster
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the requirements file into the container
+COPY requirements.txt .
+
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
+COPY . .
+
+# Make port 8000 available to the world outside this container
+EXPOSE 8000
+
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+
+
+==== requirements.txt ====
+fastapi==0.68.0
+uvicorn==0.15.0
+sqlalchemy==1.4.23
+pydantic==1.8.2
+python-jose==3.3.0
+passlib==1.7.4
+python-multipart==0.0.5
+email-validator==1.1.3
+psycopg2-binary==2.9.1
+langchain==0.0.184
+PyPDF2==3.0.1
+python-docx==0.8.11
+openpyxl==3.0.9
+
+
+
+
+==== app\main.py ====
+from fastapi import FastAPI
+from app.api.api import api_router
+from app.core.config import settings
+
+app = FastAPI(title=settings.PROJECT_NAME)
+
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+==== app\api\api.py ====
+from fastapi import APIRouter
+from app.api.endpoints import auth, users, convert
+
+api_router = APIRouter()
+api_router.include_router(auth.router, tags=["auth"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(convert.router, prefix="/convert", tags=["convert"])
+
+
+
+
+==== app\api\endpoints.py ====
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from app import crud, models, schemas
+from app.api import deps
+from app.core import security
+from app.services import file_converter
+from app.core.config import settings
+from datetime import timedelta
+
+auth_router = APIRouter()
+users_router = APIRouter()
+convert_router = APIRouter()
+
+@auth_router.post("/login", response_model=schemas.Token)
+def login_access_token(
+    db: Session = Depends(deps.get_db), form_data: OAuth2PasswordRequestForm = Depends()
+):
+    user = crud.user.authenticate(db, email=form_data.username, password=form_data.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return {
+        "access_token": security.create_access_token(
+            user.id, expires_delta=access_token_expires
+        ),
+        "token_type": "bearer",
+    }
+
+@users_router.post("/", response_model=schemas.User)
+def create_user(*, db: Session = Depends(deps.get_db), user_in: schemas.UserCreate):
+    user = crud.user.get_by_email(db, email=user_in.email)
+    if user:
+        raise HTTPException(
+            status_code=400,
+            detail="The user with this username already exists in the system.",
+        )
+    user = crud.user.create(db, obj_in=user_in)
+    return user
+
+@users_router.get("/me", response_model=schemas.User)
+def read_user_me(
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    return current_user
+
+@users_router.post("/upgrade", response_model=schemas.User)
+def upgrade_to_pro(
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    if current_user.is_pro:
+        raise HTTPException(status_code=400, detail="User is already a Pro member")
+    user = crud.user.upgrade_to_pro(db, user=current_user)
+    return user
+
+@convert_router.post("/", response_model=schemas.ConversionResult)
+async def convert_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    if not current_user.is_pro and current_user.conversion_count >= settings.FREE_TIER_LIMIT:
+        raise HTTPException(status_code=400, detail="Free tier conversion limit reached")
+    
+    result = await file_converter.convert_file(file, current_user.is_pro)
+    
+    if not current_user.is_pro:
+        crud.user.increment_conversion_count(db, user=current_user)
+    
+    return result
+
+router = APIRouter()
+router.include_router(auth_router, prefix="/auth", tags=["auth"])
+router.include_router(users_router, prefix="/users", tags=["users"])
+router.include_router(convert_router, prefix="/convert", tags=["convert"])
+
+
+
+
+==== app\core\config.py ====
+from pydantic import BaseSettings, AnyHttpUrl
+from typing import List
+import secrets
+
+class Settings(BaseSettings):
+    API_V1_STR: str = "/api/v1"
+    SECRET_KEY: str = secrets.token_urlsafe(32)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
+    SERVER_NAME: str = "FinalRAGConverterPlease"
+    SERVER_HOST: AnyHttpUrl = "https://api.finalragconverterplease.com"
+    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
+        "http://localhost:3000",  # React default port
+        "https://finalragconverterplease.com"  # Your production frontend URL
+    ]
+    PROJECT_NAME: str = "FinalRAGConverterPlease"
+
+    POSTGRES_SERVER: str
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
+    SQLALCHEMY_DATABASE_URI: str = None
+
+    FREE_TIER_LIMIT: int = 5  # Number of free conversions
+
+    @property
+    def SQLALCHEMY_DATABASE_URI(self) -> str:
+        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+
+    class Config:
+        case_sensitive = True
+        env_file = ".env"
+
+settings = Settings()
+
+
+
+
+==== app\core\security.py ====
+from datetime import datetime, timedelta
+from typing import Any, Union
+from jose import jwt
+from passlib.context import CryptContext
+from app.core.config import settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
+    to_encode = {"exp": expire, "sub": str(subject)}
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+    return encoded_jwt
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+
+
+==== app\db\base.py ====
+from app.db.base_class import Base
+from app.models.user import User
+
+
+
+
+==== app\db\session.py ====
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.core.config import settings
+
+engine = create_engine(settings.SQLALCHEMY_DATABASE_URI, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+
+
+==== app\models\user.py ====
+from sqlalchemy import Boolean, Column, Integer, String
+from app.db.base_class import Base
+
+class User(Base):
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(Boolean(), default=True)
+    is_pro = Column(Boolean(), default=False)
+    conversion_count = Column(Integer, default=0)
+
+
+
+
+==== app\schemas\token.py ====
+from typing import Optional
+from pydantic import BaseModel
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenPayload(BaseModel):
+    sub: Optional[int] = None
+
+
+
+
+==== app\schemas\user.py ====
+from typing import Optional
+from pydantic import BaseModel, EmailStr
+
+class UserBase(BaseModel):
+    email: Optional[EmailStr] = None
+    is_active: Optional[bool] = True
+    is_pro: bool = False
+    conversion_count: int = 0
+
+class UserCreate(UserBase):
+    email: EmailStr
+    password: str
+
+class UserInDBBase(UserBase):
+    id: Optional[int] = None
+
+    class Config:
+        orm_mode = True
+
+class User(UserInDBBase):
+    pass
+
+class UserInDB(UserInDBBase):
+    hashed_password: str
+
+
+
+
+==== app\services\file_converter.py ====
+import os
+import tempfile
+from fastapi import UploadFile
+from langchain.document_loaders import (
+    PyPDFLoader, Docx2txtLoader, UnstructuredPowerPointLoader, 
+    UnstructuredExcelLoader, TextLoader, CSVLoader
+)
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+async def convert_file(file: UploadFile, is_pro: bool) -> dict:
+    # Save the uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        # Determine the file type and use the appropriate loader
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        
+        if file_extension == '.pdf':
+            loader = PyPDFLoader(temp_file_path)
+        elif file_extension == '.docx':
+            loader = Docx2txtLoader(temp_file_path)
+        elif file_extension == '.pptx':
+            loader = UnstructuredPowerPointLoader(temp_file_path)
+        elif file_extension == '.xlsx':
+            loader = UnstructuredExcelLoader(temp_file_path)
+        elif file_extension == '.txt':
+            loader = TextLoader(temp_file_path)
+        elif file_extension == '.csv':
+            loader = CSVLoader(temp_file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_extension}")
+
+        # Load the document
+        documents = loader.load()
+
+        # Split the document into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
+        )
+        split_docs = text_splitter.split_documents(documents)
+
+        # Process the documents (you can add more processing here)
+        result = {
+            "filename": file.filename,
+            "num_pages": len(documents),
+            "num_chunks": len(split_docs),
+            "sample_text": split_docs[0].page_content[:200] if split_docs else ""
+        }
+
+        return result
+
+    finally:
+        # Clean up the temporary file
+        os.unlink(temp_file_path)
+
+
+
+
